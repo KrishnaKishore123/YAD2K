@@ -306,18 +306,15 @@ def yolo(inputs, anchors, num_classes):
     return outputs
 
 
-def yolo_filter_boxes(boxes, box_confidence, box_class_probs, threshold=.6):
+def yolo_filter_boxes(boxes, box_confidence, threshold=.6):
     """Filter YOLO boxes based on object and class confidence."""
-    box_scores = box_confidence * box_class_probs
-    box_classes = K.argmax(box_scores, axis=-1)
-    box_class_scores = K.max(box_scores, axis=-1)
-    prediction_mask = box_class_scores >= threshold
+    box_scores = box_confidence
+    prediction_mask = box_scores >= threshold
 
     # TODO: Expose tf.boolean_mask to Keras backend?
     boxes = tf.boolean_mask(boxes, prediction_mask)
-    scores = tf.boolean_mask(box_class_scores, prediction_mask)
-    classes = tf.boolean_mask(box_classes, prediction_mask)
-    return boxes, scores, classes
+    scores = tf.boolean_mask(box_scores, prediction_mask)
+    return boxes, scores
 
 
 def yolo_eval(yolo_outputs,
@@ -326,10 +323,10 @@ def yolo_eval(yolo_outputs,
               score_threshold=.6,
               iou_threshold=.5):
     """Evaluate YOLO model on given input batch and return filtered boxes."""
-    box_xy, box_wh, box_confidence, box_class_probs = yolo_outputs
+    box_xy, box_wh, box_confidence = yolo_outputs
     boxes = yolo_boxes_to_corners(box_xy, box_wh)
-    boxes, scores, classes = yolo_filter_boxes(
-        boxes, box_confidence, box_class_probs, threshold=score_threshold)
+    boxes, scores = yolo_filter_boxes(
+        boxes, box_confidence, threshold=score_threshold)
 
     # Scale boxes back to original image shape.
     height = image_shape[0]
@@ -345,8 +342,7 @@ def yolo_eval(yolo_outputs,
         boxes, scores, max_boxes_tensor, iou_threshold=iou_threshold)
     boxes = K.gather(boxes, nms_index)
     scores = K.gather(scores, nms_index)
-    classes = K.gather(classes, nms_index)
-    return boxes, scores, classes
+    return boxes, scores
 
 
 def preprocess_true_boxes(true_boxes, anchors, image_size):

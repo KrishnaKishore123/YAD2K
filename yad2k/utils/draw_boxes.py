@@ -26,7 +26,7 @@ def get_colors_for_classes(num_classes):
     return colors
 
 
-def draw_boxes(image, boxes, box_classes, class_names, scores=None):
+def draw_boxes(image, boxes, scores=None):
     """Draw bounding boxes on image.
 
     Draw bounding boxes with class name and optional box score on image.
@@ -42,6 +42,8 @@ def draw_boxes(image, boxes, box_classes, class_names, scores=None):
     Returns:
         A copy of `image` modified with given bounding boxes.
     """
+    box_classes=[0]*len(boxes)
+    class_names=["person"]
     image = Image.fromarray(np.floor(image * 255 + 0.5).astype('uint8'))
 
     font = ImageFont.truetype(
