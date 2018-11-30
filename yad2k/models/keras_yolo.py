@@ -204,7 +204,7 @@ def yolo_loss(args,
     yolo_output_shape = K.shape(yolo_output)
     feats = K.reshape(yolo_output, [
         -1, yolo_output_shape[1], yolo_output_shape[2], num_anchors,
-        num_classes + 5
+        5
     ])
     pred_boxes = K.concatenate(
         (K.sigmoid(feats[..., 0:2]), feats[..., 2:4]), axis=-1)
@@ -286,14 +286,14 @@ def yolo_loss(args,
     classification_loss_sum = K.sum(classification_loss)
     coordinates_loss_sum = K.sum(coordinates_loss)
     total_loss = 0.5 * (
-        confidence_loss_sum + classification_loss_sum + coordinates_loss_sum)
+        confidence_loss_sum + coordinates_loss_sum)
     if print_loss:
         total_loss = tf.Print(
             total_loss, [
-                total_loss, confidence_loss_sum, classification_loss_sum,
+                total_loss, confidence_loss_sum,
                 coordinates_loss_sum
             ],
-            message='yolo_loss, conf_loss, class_loss, box_coord_loss:')
+            message='yolo_loss, conf_loss, box_coord_loss:')
 
     return total_loss
 

@@ -1,0 +1,3 @@
+sudo apt-get install python3-tk
+sudo pip3.6 install pillow
+sudo pip3.6 install matplotlib

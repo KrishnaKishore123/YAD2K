@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 """Run a YOLO_v2 style detection model on test images."""
 import argparse
 import colorsys
