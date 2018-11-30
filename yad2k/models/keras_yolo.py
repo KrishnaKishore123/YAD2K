@@ -112,7 +112,7 @@ def yolo_head(feats, anchors, num_classes):
     conv_index = K.cast(conv_index, K.dtype(feats))
 
     feats = K.reshape(
-        feats, [-1, conv_dims[0], conv_dims[1], num_anchors, num_classes + 5])
+        feats, [-1, conv_dims[0], conv_dims[1], num_anchors, 5])
     conv_dims = K.cast(K.reshape(conv_dims, [1, 1, 1, 1, 2]), K.dtype(feats))
 
     # Static generation of conv_index:
@@ -126,14 +126,14 @@ def yolo_head(feats, anchors, num_classes):
     box_xy = K.sigmoid(feats[..., :2])
     box_wh = K.exp(feats[..., 2:4])
     box_confidence = K.sigmoid(feats[..., 4:5])
-    box_class_probs = K.softmax(feats[..., 5:])
+    #box_class_probs = K.softmax(feats[..., 5:])
 
     # Adjust preditions to each spatial grid point and anchor size.
     # Note: YOLO iterates over height index before width index.
     box_xy = (box_xy + conv_index) / conv_dims
     box_wh = box_wh * anchors_tensor / conv_dims
 
-    return box_xy, box_wh, box_confidence, box_class_probs
+    return box_xy, box_wh, box_confidence#, box_class_probs
 
 
 def yolo_boxes_to_corners(box_xy, box_wh):
@@ -196,7 +196,7 @@ def yolo_loss(args,
     no_object_scale = 1
     class_scale = 1
     coordinates_scale = 1
-    pred_xy, pred_wh, pred_confidence, pred_class_prob = yolo_head(
+    pred_xy, pred_wh, pred_confidence = yolo_head(
         yolo_output, anchors, num_classes)
 
     # Unadjusted box predictions for loss.
@@ -272,10 +272,10 @@ def yolo_loss(args,
 
     # Classification loss for matching detections.
     # NOTE: YOLO does not use categorical cross-entropy loss here.
-    matching_classes = K.cast(matching_true_boxes[..., 4], 'int32')
-    matching_classes = K.one_hot(matching_classes, num_classes)
-    classification_loss = (class_scale * detectors_mask *
-                           K.square(matching_classes - pred_class_prob))
+    #matching_classes = K.cast(matching_true_boxes[..., 4], 'int32')
+    #matching_classes = K.one_hot(matching_classes, num_classes)
+    #classification_loss = (class_scale * detectors_mask *
+     #                      K.square(matching_classes - pred_class_prob))
 
     # Coordinate loss for matching detection boxes.
     matching_boxes = matching_true_boxes[..., 0:4]
@@ -283,7 +283,7 @@ def yolo_loss(args,
                         K.square(matching_boxes - pred_boxes))
 
     confidence_loss_sum = K.sum(confidence_loss)
-    classification_loss_sum = K.sum(classification_loss)
+    #classification_loss_sum = K.sum(classification_loss)
     coordinates_loss_sum = K.sum(coordinates_loss)
     total_loss = 0.5 * (
         confidence_loss_sum + coordinates_loss_sum)
@@ -391,7 +391,7 @@ def preprocess_true_boxes(true_boxes, anchors, image_size):
 
     for box in true_boxes:
         # scale box to convolutional feature spatial dimensions
-        box_class = box[4:5]
+        #box_class = box[4:5]
         box = box[0:4] * np.array(
             [conv_width, conv_height, conv_width, conv_height])
         i = np.floor(box[1]).astype('int')
@@ -422,7 +422,7 @@ def preprocess_true_boxes(true_boxes, anchors, image_size):
                 [
                     box[0] - j, box[1] - i,
                     np.log(box[2] / anchors[best_anchor][0]),
-                    np.log(box[3] / anchors[best_anchor][1]), box_class
+                    np.log(box[3] / anchors[best_anchor][1])
                 ],
                 dtype=np.float32)
             matching_true_boxes[i, j, best_anchor] = adjusted_box

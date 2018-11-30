@@ -26,7 +26,7 @@ argparser.add_argument(
 	'-d',
 	'--data_path',
 	help="path to numpy data file (.npz) containing np.object array 'boxes' and np.uint8 array 'images'",
-	default=os.path.join('..', 'DATA', 'underwater_data.npz'))
+	default=os.path.join('..', 'COCO_DATA', 'anotations.txt'))
 
 argparser.add_argument(
 	'-a',
@@ -101,7 +101,7 @@ def get_anchors(anchors_path):
 
 def process_data(images, boxes=None):
 	'''processes the data'''
-	images = [PIL.Image.fromarray(i) for i in images]
+	#images = [PIL.Image.fromarray(i) for i in images]
 	orig_size = np.array([images[0].width, images[0].height])
 	orig_size = np.expand_dims(orig_size, axis=0)
 
@@ -113,17 +113,17 @@ def process_data(images, boxes=None):
 	if boxes is not None:
 		# Box preprocessing.
 		# Original boxes stored as 1D list of class, x_min, y_min, x_max, y_max.
-		boxes = [box.reshape((-1, 5)) for box in boxes]
+		boxes = [box.reshape((-1, 4)) for box in boxes]
 		# Get extents as y_min, x_min, y_max, x_max, class for comparision with
 		# model output.
-		boxes_extents = [box[:, [2, 1, 4, 3, 0]] for box in boxes]
+		boxes_extents = [box[:, [1, 0, 3, 2]] for box in boxes]
 
 		# Get box parameters as x_center, y_center, box_width, box_height, class.
-		boxes_xy = [0.5 * (box[:, 3:5] + box[:, 1:3]) for box in boxes]
-		boxes_wh = [box[:, 3:5] - box[:, 1:3] for box in boxes]
+		boxes_xy = [0.5 * (box[:, 2:4] + box[:, 0:2]) for box in boxes]
+		boxes_wh = [box[:, 2:4] - box[:, 0:2] for box in boxes]
 		boxes_xy = [boxxy / orig_size for boxxy in boxes_xy]
 		boxes_wh = [boxwh / orig_size for boxwh in boxes_wh]
-		boxes = [np.concatenate((boxes_xy[i], boxes_wh[i], box[:, 0:1]), axis=1) for i, box in enumerate(boxes)]
+		boxes = [np.concatenate((boxes_xy[i], boxes_wh[i]), axis=1) for i, box in enumerate(boxes)]
 
 		# find the max number of boxes
 		max_boxes = 0
@@ -134,7 +134,7 @@ def process_data(images, boxes=None):
 		# add zero pad for training
 		for i, boxz in enumerate(boxes):
 			if boxz.shape[0]  < max_boxes:
-				zero_padding = np.zeros( (max_boxes-boxz.shape[0], 5), dtype=np.float32)
+				zero_padding = np.zeros( (max_boxes-boxz.shape[0], 4), dtype=np.float32)
 				boxes[i] = np.vstack((boxz, zero_padding))
 
 		return np.array(processed_images), np.array(boxes)
@@ -175,11 +175,11 @@ def create_model(anchors, class_names, load_pretrained=True, freeze_body=True):
 	'''
 
 	detectors_mask_shape = (13, 13, 5, 1)
-	matching_boxes_shape = (13, 13, 5, 5)
+	matching_boxes_shape = (13, 13, 5, 4)
 
 	# Create model input layers.
 	image_input = Input(shape=(416, 416, 3))
-	boxes_input = Input(shape=(None, 5))
+	boxes_input = Input(shape=(None, 4))
 	detectors_mask_input = Input(shape=detectors_mask_shape)
 	matching_boxes_input = Input(shape=matching_boxes_shape)
 
@@ -224,14 +224,10 @@ def create_model(anchors, class_names, load_pretrained=True, freeze_body=True):
 
 	return model_body, model
 
-def data_generator(data, batch_size=32):
+def data_generator(base_path, data, batch_size=32):
 	i = 0
-	local_batch = batch_size
 	while True:
 		if i+batch_size >= len(data):
-			local_batch = len(data)-i-1
-		if i >= len(data):
-			local_batch = batch_size
 			i = 0
 		images = []
 		boxes = []
@@ -239,19 +235,26 @@ def data_generator(data, batch_size=32):
 			line = data[i+j]
 			parts = line.strip().split(" ")
 			file_name = os.path.join(base_path, parts[0])
-			images.append(PIL.Image.open(file_name))
+			image = PIL.Image.open(file_name)
+			if np.ndim(np.array(image)) != 3:
+				#TODO: find a better method to handle grayscale images
+				image = np.array([np.array(image), np.array(image), np.array(image)])
+				image = PIL.Image.fromarray(np.transpose(image, (1,2,0)))
+			images.append(image)
 			dets = []
-			for k in range(int(en(parts[1:])/4)):
-				dets.append([parts[4*k],parts[4*k+1],parts[4*k+2],parts[4*k+3]])
-			boxes.append(dets)
-		
-		image_data, boxes = process_data(images,boxes)
+			for k in range(int(len(parts[1:])/4)):
+				dets.append([float(parts[4*k+1]),float(parts[4*k+2]),float(parts[4*k+3]),float(parts[4*k+4])])
+			boxes.append(np.array(dets))
+
+		i += batch_size
+
+		image_data, boxes = process_data(images,np.array(boxes))
 
 		anchors = YOLO_ANCHORS
 
 		detectors_mask, matching_true_boxes = get_detector_mask(boxes, anchors)
 
-		yield [image_data, boxes, detectors_mask, matching_true_boxes], np.zeros(local_batch)
+		yield [image_data, boxes, detectors_mask, matching_true_boxes], np.zeros(batch_size)
 
 def train(model, class_names, anchors, data_path, validation_split=0.1):
 	'''
@@ -276,7 +279,9 @@ def train(model, class_names, anchors, data_path, validation_split=0.1):
 
 	with open(data_path) as f:
 		data = f.readlines()
-	model.fit_generator(data_generator(data, batch_size=32), callbacks=[logging], steps_per_epoch=len(data)//32)
+	#base path changes for each dataset
+	base_path = os.path.join(os.path.dirname(data_path),"train2014")
+	model.fit_generator(data_generator(base_path, data, batch_size=32), callbacks=[logging], steps_per_epoch=len(data)//32,verbose=1)
 	#model.fit([image_data, boxes, detectors_mask, matching_true_boxes],
 	#		  np.zeros(len(image_data)),
 	#		  validation_split=validation_split,
