@@ -312,9 +312,11 @@ def yolo_filter_boxes(boxes, box_confidence, threshold=.6):
     prediction_mask = box_scores >= threshold
 
     # TODO: Expose tf.boolean_mask to Keras backend?
-    boxes = tf.boolean_mask(boxes, prediction_mask)
+    prediction_mask = tf.squeeze(prediction_mask)
+    prediction_mask.set_shape([None,None,None,5,])
     scores = tf.boolean_mask(box_scores, prediction_mask)
-    return boxes, scores
+    boxes_ = tf.boolean_mask(boxes, prediction_mask)
+    return boxes_, tf.squeeze(scores)
 
 
 def yolo_eval(yolo_outputs,
@@ -324,9 +326,10 @@ def yolo_eval(yolo_outputs,
               iou_threshold=.5):
     """Evaluate YOLO model on given input batch and return filtered boxes."""
     box_xy, box_wh, box_confidence = yolo_outputs
-    boxes = yolo_boxes_to_corners(box_xy, box_wh)
+    boxes_ = yolo_boxes_to_corners(box_xy, box_wh)
     boxes, scores = yolo_filter_boxes(
-        boxes, box_confidence, threshold=score_threshold)
+        boxes_, box_confidence, threshold=score_threshold)
+    scores.set_shape([None])
 
     # Scale boxes back to original image shape.
     height = image_shape[0]
@@ -388,6 +391,7 @@ def preprocess_true_boxes(true_boxes, anchors, image_size):
     for box in true_boxes:
         # scale box to convolutional feature spatial dimensions
         #box_class = box[4:5]
+        box_orig = box
         box = box[0:4] * np.array(
             [conv_width, conv_height, conv_width, conv_height])
         i = np.floor(box[1]).astype('int')
@@ -413,7 +417,12 @@ def preprocess_true_boxes(true_boxes, anchors, image_size):
                 best_anchor = k
 
         if best_iou > 0:
-            detectors_mask[i, j, best_anchor] = 1
+            try:
+                detectors_mask[i, j, best_anchor] = 1
+            except Exception as e:
+                print(box, box_orig, conv_width, conv_height, i, j)
+                print(e)
+                sys.exit(1)
             adjusted_box = np.array(
                 [
                     box[0] - j, box[1] - i,

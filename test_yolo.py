@@ -6,12 +6,16 @@ import imghdr
 import os
 import random
 
+import tensorflow as tf
 import numpy as np
 from keras import backend as K
-from keras.models import load_model
+from keras.models import load_model, Model
 from PIL import Image, ImageDraw, ImageFont
+from keras.layers import Input, Lambda, Conv2D
 
-from yad2k.models.keras_yolo import yolo_eval, yolo_head
+from yad2k.models.keras_yolo import yolo_body, yolo_eval, yolo_head, yolo_loss
+#from yad2k.models.keras_yolo import (preprocess_true_boxes, 
+#                                     yolo_eval, yolo_head)
 
 parser = argparse.ArgumentParser(
     description='Run a YOLO_v2 style detection model on test images..')
@@ -52,6 +56,43 @@ parser.add_argument(
     help='threshold for non max suppression IOU, default .5',
     default=.5)
 
+YOLO_ANCHORS = np.array(
+    ((0.57273, 0.677385), (1.87446, 2.06253), (3.33843, 5.47434),
+     (7.88282, 3.52778), (9.77052, 9.16828)))
+
+def create_model(anchors, class_names, load_pretrained=True, freeze_body=True):
+    '''
+    returns the body of the model and the model
+
+    # Params:
+
+    load_pretrained: whether or not to load the pretrained model or initialize all weights
+
+    freeze_body: whether or not to freeze all weights except for the last layer's
+
+    # Returns:
+
+    model_body: YOLOv2 with new output layer
+
+    model: YOLOv2 with custom loss Lambda layer
+
+    '''
+
+    detectors_mask_shape = (13, 13, 5, 1)
+    matching_boxes_shape = (13, 13, 5, 4)
+
+    # Create model input layers.
+    image_input = Input(shape=(416, 416, 3))
+
+    # Create model body.
+    yolo_model = yolo_body(image_input, len(anchors), len(class_names))
+    topless_yolo = Model(yolo_model.input, yolo_model.layers[-2].output)
+
+    final_layer = Conv2D(len(anchors)*(5), (1, 1), activation='linear')(topless_yolo.output)
+
+    model_body = Model(image_input, final_layer)
+
+    return model_body
 
 def _main(args):
     model_path = os.path.expanduser(args.model_path)
@@ -76,14 +117,19 @@ def _main(args):
         anchors = [float(x) for x in anchors.split(',')]
         anchors = np.array(anchors).reshape(-1, 2)
 
-    yolo_model = load_model(model_path)
+    anchors = YOLO_ANCHORS
+
+    yolo_model = create_model(anchors, class_names)
+
+    #yolo_model = load_model(model_path)
+    yolo_model.load_weights(model_path)
 
     # Verify model, anchors, and classes are compatible
     num_classes = len(class_names)
     num_anchors = len(anchors)
     # TODO: Assumes dim ordering is channel last
     model_output_channels = yolo_model.layers[-1].output_shape[-1]
-    assert model_output_channels == num_anchors * (num_classes + 5), \
+    assert model_output_channels == num_anchors * (5), \
         'Mismatch between model and given anchor and class sizes. ' \
         'Specify matching anchors and classes with --anchors_path and ' \
         '--classes_path flags.'
@@ -108,7 +154,7 @@ def _main(args):
     # TODO: Wrap these backend operations with Keras layers.
     yolo_outputs = yolo_head(yolo_model.output, anchors, len(class_names))
     input_image_shape = K.placeholder(shape=(2, ))
-    boxes, scores, classes = yolo_eval(
+    boxes, scores = yolo_eval(
         yolo_outputs,
         input_image_shape,
         score_threshold=args.score_threshold,
@@ -139,8 +185,9 @@ def _main(args):
         image_data /= 255.
         image_data = np.expand_dims(image_data, 0)  # Add batch dimension.
 
-        out_boxes, out_scores, out_classes = sess.run(
-            [boxes, scores, classes],
+        print("processing: ", image_file)
+        out_boxes, out_scores = sess.run(
+            [boxes, scores],
             feed_dict={
                 yolo_model.input: image_data,
                 input_image_shape: [image.size[1], image.size[0]],
@@ -152,6 +199,8 @@ def _main(args):
             font='font/FiraMono-Medium.otf',
             size=np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
         thickness = (image.size[0] + image.size[1]) // 300
+
+        out_classes = [0]*len(out_boxes)
 
         for i, c in reversed(list(enumerate(out_classes))):
             predicted_class = class_names[c]

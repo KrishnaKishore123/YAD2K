@@ -101,8 +101,8 @@ def get_anchors(anchors_path):
 def process_data(images, boxes=None):
 	'''processes the data'''
 	#images = [PIL.Image.fromarray(i) for i in images]
-	orig_size = np.array([images[0].width, images[0].height])
-	orig_size = np.expand_dims(orig_size, axis=0)
+	orig_size = [np.array([i.width, i.height]) for i in images]
+	#orig_size = np.expand_dims(orig_size, axis=0)
 
 	# Image preprocessing.
 	processed_images = [i.resize((416, 416), PIL.Image.BICUBIC) for i in images]
@@ -112,16 +112,15 @@ def process_data(images, boxes=None):
 	if boxes is not None:
 		# Box preprocessing.
 		# Original boxes stored as 1D list of class, x_min, y_min, x_max, y_max.
-		boxes = [box.reshape((-1, 4)) for box in boxes]
+		#boxes = [box.reshape((-1, 4)) for box in boxes]
 		# Get extents as y_min, x_min, y_max, x_max, class for comparision with
 		# model output.
-		boxes_extents = [box[:, [1, 0, 3, 2]] for box in boxes]
-
+		#boxes_extents = [box[:, [1, 0, 3, 2]] for box in boxes]
 		# Get box parameters as x_center, y_center, box_width, box_height, class.
-		boxes_xy = [0.5 * (box[:, 2:4] + box[:, 0:2]) for box in boxes]
-		boxes_wh = [box[:, 2:4] - box[:, 0:2] for box in boxes]
-		boxes_xy = [boxxy / orig_size for boxxy in boxes_xy]
-		boxes_wh = [boxwh / orig_size for boxwh in boxes_wh]
+		boxes_xy = [0.5 * (box[:, 2:4]) + box[:, 0:2] for box in boxes]
+		boxes_wh = [box[:, 2:4] for box in boxes]
+		boxes_xy = [boxxy / orig_size[i] for i, boxxy in enumerate(boxes_xy)]
+		boxes_wh = [boxwh / orig_size[i] for i, boxwh in enumerate(boxes_wh)]
 		boxes = [np.concatenate((boxes_xy[i], boxes_wh[i]), axis=1) for i, box in enumerate(boxes)]
 
 		# find the max number of boxes
@@ -247,7 +246,7 @@ def data_generator(base_path, data, batch_size=32):
 
 		i += batch_size
 
-		image_data, boxes = process_data(images,np.array(boxes))
+		image_data, boxes = process_data(images,boxes)
 
 		anchors = YOLO_ANCHORS
 
@@ -280,14 +279,15 @@ def train(model, class_names, anchors, data_path, validation_split=0.1):
 		data = f.readlines()
 	#base path changes for each dataset
 	base_path = os.path.join(os.path.dirname(data_path),"train2014")
-	model.fit_generator(data_generator(base_path, data, batch_size=32), callbacks=[logging], steps_per_epoch=len(data)//32, verbose=1, epochs=5)
-	#model.fit([image_data, boxes, detectors_mask, matching_true_boxes],
-	#		  np.zeros(len(image_data)),
-	#		  validation_split=validation_split,
-	#		  batch_size=32,
-	#		  epochs=5,
-	#		  callbacks=[logging])
-	model.save_weights('trained_stage_1.h5')
+	if not os.path.exists("trained_stage_1.h5"):
+		model.fit_generator(data_generator(base_path, data, batch_size=32), callbacks=[logging], steps_per_epoch=len(data)//32, verbose=1, epochs=5)
+		#model.fit([image_data, boxes, detectors_mask, matching_true_boxes],
+		#		  np.zeros(len(image_data)),
+		#		  validation_split=validation_split,
+		#		  batch_size=32,
+		#		  epochs=5,
+		#		  callbacks=[logging])
+		model.save('trained_stage_1.h5')
 
 	model_body, model = create_model(anchors, class_names, load_pretrained=False, freeze_body=False)
 
@@ -307,7 +307,7 @@ def train(model, class_names, anchors, data_path, validation_split=0.1):
 	#		  epochs=30,
 	#		  callbacks=[logging])
 
-	model.save_weights('trained_stage_2.h5')
+	model.save('trained_stage_2.h5')
 
 	model.fit_generator(data_generator(base_path, data, batch_size=8), callbacks=[logging, checkpoint, early_stopping], steps_per_epoch=len(data)//8, verbose=1, epochs=30)
 	#model.fit([image_data, boxes, detectors_mask, matching_true_boxes],
@@ -317,7 +317,7 @@ def train(model, class_names, anchors, data_path, validation_split=0.1):
 	#		  epochs=30,
 	#		  callbacks=[logging, checkpoint, early_stopping])
 
-	model.save_weights('trained_stage_3.h5')
+	model.save('trained_stage_3.h5')
 
 def draw(model_body, class_names, anchors, test_data, weights_name='trained_stage_3_best.h5', out_path="output_images", save_all=True):
 	'''
